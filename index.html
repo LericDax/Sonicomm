@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Browser Audio Modem Deluxe Regime</title>
+    <!-- React (Production UMD) -->
+    <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <!-- ReactDOM (Production UMD) -->
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <!-- Babel Standalone for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 1rem;
+        background: #f8f8f8;
+      }
+      .container {
+        max-width: 900px;
+        margin: auto;
+        padding: 1rem;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+      }
+      label {
+        margin-right: 0.5rem;
+      }
+      input,
+      select,
+      button {
+        margin: 0.3rem 0.5rem 0.3rem 0;
+        padding: 0.3rem;
+        font-size: 1rem;
+      }
+      button {
+        cursor: pointer;
+      }
+      .section {
+        margin-bottom: 1.5rem;
+      }
+      .advanced-options {
+        border: 1px solid #aaa;
+        padding: 0.5rem;
+        border-radius: 6px;
+        background: #eef;
+      }
+      ul {
+        list-style: none;
+        padding-left: 0;
+      }
+      li {
+        background: #def;
+        margin-bottom: 0.3rem;
+        padding: 0.3rem;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="root"></div>
+    <script type="text/babel">
+      const { useState, useRef } = React;
+
+      function AudioModemDeluxeApp() {
+        // Basic message state
+        const [messageToSend, setMessageToSend] = useState("");
+        const [receivedMessages, setReceivedMessages] = useState([]);
+        // Transmission options
+        const [baseFrequency, setBaseFrequency] = useState(2000); // Hz
+        const [frequencyStep, setFrequencyStep] = useState(10);   // Hz per symbol
+        const [toneDuration, setToneDuration] = useState(0.1);      // seconds per tone
+        const [encodingType, setEncodingType] = useState("ASCII");  // "ASCII", "Hex", "Binary"
+        // Deluxe mode toggle and advanced options
+        const [deluxeMode, setDeluxeMode] = useState(false);
+        const [errorCorrection, setErrorCorrection] = useState(false);
+        const [modulationScheme, setModulationScheme] = useState("FSK"); // "FSK", "PSK", "QAM"
+        const [multiChannel, setMultiChannel] = useState(false);
+        // Receiver state
+        const [isReceiving, setIsReceiving] = useState(false);
+
+        // Refs for audio handling
+        const audioContextRef = useRef(null);
+        const analyserRef = useRef(null);
+        const mediaStreamRef = useRef(null);
+        const requestIdRef = useRef(null);
+        // Buffer for assembling received messages
+        const receivedBufferRef = useRef("");
+
+        // Reserved tone markers for framing
+        const startFrequency = baseFrequency - 100;
+        const stopFrequency = baseFrequency - 50;
+        // An extra tone for error correction if enabled
+        const errorCorrectionFrequency = baseFrequency + 500;
+
+        // ----- Encoding Functions -----
+        function asciiCharToFrequency(char) {
+          const code = char.charCodeAt(0);
+          if (code < 32 || code > 126) return baseFrequency;
+          return baseFrequency + (code - 32) * frequencyStep;
+        }
+        function asciiFrequencyToChar(freq) {
+          const diff = freq - baseFrequency;
+          const code = Math.round(diff / frequencyStep) + 32;
+          return String.fromCharCode(code);
+        }
+        function hexCharToFrequency(char) {
+          let value;
+          if (char >= "0" && char <= "9") {
+            value = parseInt(char, 10);
+          } else {
+            value = 10 + (char.toUpperCase().charCodeAt(0) - "A".charCodeAt(0));
+          }
+          return baseFrequency + value * frequencyStep;
+        }
+        function hexFrequencyToChar(freq) {
+          const diff = freq - baseFrequency;
+          const value = Math.round(diff / frequencyStep);
+          if (value < 0 || value > 15) return "";
+          return value < 10 ? value.toString() : String.fromCharCode("A".charCodeAt(0) + (value - 10));
+        }
+        function binaryCharToFrequency(char) {
+          const value = char === "1" ? 1 : 0;
+          return baseFrequency + value * frequencyStep;
+        }
+        function binaryFrequencyToChar(freq) {
+          const diff = freq - baseFrequency;
+          const value = Math.round(diff / frequencyStep);
+          return value === 1 ? "1" : "0";
+        }
+
+        // ----- Sending Function -----
+        async function sendMessage() {
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          const ctx = audioContextRef.current;
+          const now = ctx.currentTime;
+          let time = now;
+          
+          // Helper to schedule a tone at a specific frequency and duration
+          function scheduleTone(frequency, duration) {
+            const oscillator = ctx.createOscillator();
+            oscillator.frequency.setValueAtTime(frequency, time);
+            // Additional modulation logic could be inserted here based on the scheme.
+            oscillator.connect(ctx.destination);
+            oscillator.start(time);
+            oscillator.stop(time + duration);
+            time += duration;
+          }
+
+          // Send START marker
+          scheduleTone(startFrequency, toneDuration);
+
+          // If multi-channel deluxe mode is enabled, interleave data with an error correction tone.
+          if (multiChannel && deluxeMode) {
+            // For demonstration, send each character’s tone followed by a duplicate tone as a simple ECC.
+            for (const char of messageToSend) {
+              let freq = baseFrequency;
+              if (encodingType === "ASCII") {
+                freq = asciiCharToFrequency(char);
+              } else if (encodingType === "Hex") {
+                const hexMessage = char.charCodeAt(0).toString(16).padStart(2, "0").toUpperCase();
+                for (const hexChar of hexMessage) {
+                  scheduleTone(hexCharToFrequency(hexChar), toneDuration);
+                }
+                continue;
+              } else if (encodingType === "Binary") {
+                const binMessage = char.charCodeAt(0).toString(2).padStart(8, "0");
+                for (const bit of binMessage) {
+                  scheduleTone(binaryCharToFrequency(bit), toneDuration);
+                }
+                continue;
+              }
+              scheduleTone(freq, toneDuration);
+              if (errorCorrection) {
+                scheduleTone(errorCorrectionFrequency, toneDuration);
+              }
+            }
+          } else {
+            // Standard single-channel mode
+            if (encodingType === "ASCII") {
+              for (const char of messageToSend) {
+                scheduleTone(asciiCharToFrequency(char), toneDuration);
+                if (deluxeMode && errorCorrection) {
+                  scheduleTone(errorCorrectionFrequency, toneDuration);
+                }
+              }
+            } else if (encodingType === "Hex") {
+              const hexMessage = Array.from(messageToSend)
+                .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0").toUpperCase())
+                .join("");
+              for (const char of hexMessage) {
+                scheduleTone(hexCharToFrequency(char), toneDuration);
+                if (deluxeMode && errorCorrection) {
+                  scheduleTone(errorCorrectionFrequency, toneDuration);
+                }
+              }
+            } else if (encodingType === "Binary") {
+              const binaryMessage = Array.from(messageToSend)
+                .map((c) => c.charCodeAt(0).toString(2).padStart(8, "0"))
+                .join("");
+              for (const bit of binaryMessage) {
+                scheduleTone(binaryCharToFrequency(bit), toneDuration);
+                if (deluxeMode && errorCorrection) {
+                  scheduleTone(errorCorrectionFrequency, toneDuration);
+                }
+              }
+            }
+          }
+
+          // Send STOP marker
+          scheduleTone(stopFrequency, toneDuration);
+        }
+
+        // ----- Receiving Functions -----
+        async function startReceiving() {
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          const ctx = audioContextRef.current;
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+            const source = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+            setIsReceiving(true);
+            receivedBufferRef.current = "";
+            detectTone();
+          } catch (err) {
+            console.error("Error accessing microphone", err);
+          }
+        }
+        function stopReceiving() {
+          setIsReceiving(false);
+          if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+            mediaStreamRef.current = null;
+          }
+          if (requestIdRef.current) {
+            cancelAnimationFrame(requestIdRef.current);
+            requestIdRef.current = null;
+          }
+        }
+        // A simple (naive) tone detection loop using the analyser's FFT
+        function detectTone() {
+          if (!analyserRef.current || !audioContextRef.current) return;
+          const analyser = analyserRef.current;
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          analyser.getByteFrequencyData(dataArray);
+          let maxVal = -Infinity;
+          let maxIndex = -1;
+          for (let i = 0; i < bufferLength; i++) {
+            if (dataArray[i] > maxVal) {
+              maxVal = dataArray[i];
+              maxIndex = i;
+            }
+          }
+          const nyquist = audioContextRef.current.sampleRate / 2;
+          const freq = (maxIndex * nyquist) / bufferLength;
+          if (maxVal > 200) {
+            // START marker detection
+            if (Math.abs(freq - startFrequency) < frequencyStep / 2) {
+              console.log("START marker detected");
+              receivedBufferRef.current = "";
+            }
+            // STOP marker detection
+            else if (Math.abs(freq - stopFrequency) < frequencyStep / 2) {
+              console.log("STOP marker detected; complete message:", receivedBufferRef.current);
+              setReceivedMessages((prev) => [...prev, receivedBufferRef.current]);
+              receivedBufferRef.current = "";
+            }
+            // Error correction tone (if enabled, we ignore it here)
+            else if (deluxeMode && errorCorrection && Math.abs(freq - errorCorrectionFrequency) < frequencyStep / 2) {
+              console.log("Error correction tone detected");
+            }
+            // Decode tone based on encoding
+            else {
+              let decodedChar = "";
+              if (encodingType === "ASCII") {
+                decodedChar = asciiFrequencyToChar(freq);
+              } else if (encodingType === "Hex") {
+                decodedChar = hexFrequencyToChar(freq);
+              } else if (encodingType === "Binary") {
+                decodedChar = binaryFrequencyToChar(freq);
+              }
+              receivedBufferRef.current += decodedChar;
+            }
+          }
+          requestIdRef.current = requestAnimationFrame(detectTone);
+        }
+
+        // ----- Calibration Function (Deluxe Only) -----
+        function calibrateNoise() {
+          alert("Calibration started. This is a placeholder for an advanced noise calibration routine.");
+          // A real calibration would analyze ambient noise and adjust thresholds accordingly.
+        }
+
+        return (
+          <div>
+            <h2>Browser Audio Modem Deluxe Regime</h2>
+            <div className="section">
+              <label>
+                Message to Send:
+                <input
+                  type="text"
+                  value={messageToSend}
+                  onChange={(e) => setMessageToSend(e.target.value)}
+                  style={{ width: "300px", marginLeft: "0.5rem" }}
+                />
+              </label>
+              <button onClick={sendMessage}>Send Message</button>
+            </div>
+
+            <div className="section">
+              <label>
+                Encoding Type:
+                <select
+                  value={encodingType}
+                  onChange={(e) => setEncodingType(e.target.value)}
+                  style={{ marginLeft: "0.5rem" }}
+                >
+                  <option value="ASCII">ASCII</option>
+                  <option value="Hex">Hex</option>
+                  <option value="Binary">Binary</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="section">
+              <label>
+                Base Frequency (Hz):
+                <input
+                  type="number"
+                  value={baseFrequency}
+                  onChange={(e) => setBaseFrequency(Number(e.target.value))}
+                  style={{ width: "80px", marginLeft: "0.5rem" }}
+                />
+              </label>
+              <label>
+                Frequency Step (Hz):
+                <input
+                  type="number"
+                  value={frequencyStep}
+                  onChange={(e) => setFrequencyStep(Number(e.target.value))}
+                  style={{ width: "80px", marginLeft: "0.5rem" }}
+                />
+              </label>
+              <label>
+                Tone Duration (s):
+                <input
+                  type="number"
+                  value={toneDuration}
+                  step="0.05"
+                  onChange={(e) => setToneDuration(Number(e.target.value))}
+                  style={{ width: "80px", marginLeft: "0.5rem" }}
+                />
+              </label>
+            </div>
+
+            <div className="section">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={deluxeMode}
+                  onChange={(e) => setDeluxeMode(e.target.checked)}
+                />
+                Enable Deluxe Mode
+              </label>
+            </div>
+
+            {deluxeMode && (
+              <div className="section advanced-options">
+                <h3>Deluxe Advanced Options</h3>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={errorCorrection}
+                    onChange={(e) => setErrorCorrection(e.target.checked)}
+                  />
+                  Enable Error Correction
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={multiChannel}
+                    onChange={(e) => setMultiChannel(e.target.checked)}
+                  />
+                  Enable Multi-Channel Transmission
+                </label>
+                <label>
+                  Modulation Scheme:
+                  <select
+                    value={modulationScheme}
+                    onChange={(e) => setModulationScheme(e.target.value)}
+                    style={{ marginLeft: "0.5rem" }}
+                  >
+                    <option value="FSK">FSK</option>
+                    <option value="PSK">PSK</option>
+                    <option value="QAM">QAM</option>
+                  </select>
+                </label>
+                <button onClick={calibrateNoise}>Calibrate Noise</button>
+              </div>
+            )}
+
+            <div className="section">
+              {!isReceiving ? (
+                <button onClick={startReceiving}>Start Receiving</button>
+              ) : (
+                <button onClick={stopReceiving}>Stop Receiving</button>
+              )}
+            </div>
+
+            <div className="section">
+              <h3>Received Messages:</h3>
+              <ul>
+                {receivedMessages.map((msg, idx) => (
+                  <li key={idx}>{msg}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.render(<AudioModemDeluxeApp />, document.getElementById("root"));
+    </script>
+  </body>
+</html>
